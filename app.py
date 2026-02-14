@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # ---------- CONFIG ----------
-TARGET_COL = "Class"  # must match column name in test CSV
+TARGET_COL = "CLASS"  # must match column name in test CSV
 LABEL_MAP = {"N": 0, "P": 1, "Y": 2}
 INV_LABEL_MAP = {v: k for k, v in LABEL_MAP.items()}
 CLASSES = [0, 1, 2]
