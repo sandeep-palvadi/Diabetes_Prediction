@@ -17,50 +17,29 @@ from sklearn.metrics import (
     f1_score, matthews_corrcoef,
     confusion_matrix, classification_report
 )
-from sklearn.preprocessing import label_binarize
-from sklearn.exceptions import UndefinedMetricWarning
-import warnings
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 # ---------- CONFIG ----------
-TARGET_COL = "Class"
+TARGET_COL = "Class"  # must match column name in test CSV
 LABEL_MAP = {"N": 0, "P": 1, "Y": 2}
 INV_LABEL_MAP = {v: k for k, v in LABEL_MAP.items()}
 CLASSES = [0, 1, 2]
 
-# ---------- PAGE SETUP ----------
 st.set_page_config(
     page_title="Diabetes Status Prediction",
     page_icon="🩺",
     layout="wide"
 )
 
-# Simple custom CSS
-st.markdown(
-    """
-    <style>
-    .main {
-        background-color: #0e1117;
-        color: #f0f2f6;
-    }
-    .stMetric {
-        background-color: #1f2933;
-        padding: 10px;
-        border-radius: 10px;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 st.markdown("## 🩺 Diabetes Status Prediction Dashboard")
 st.markdown(
     "Predict whether a person is **Non‑diabetic (N)**, **Pre‑diabetic (P)**, "
-    "or **Diabetic (Y)** using multiple ML models."
+    "or **Diabetic (Y)** using six ML models."
 )
 
-# ---------- LOADERS ----------
+# ---------- HELPERS ----------
+
 @st.cache_resource
 def load_model(name: str):
     filename = name.lower().replace(" ", "_") + ".pkl"
@@ -73,10 +52,20 @@ def load_scaler_and_features():
     return scaler, feature_columns
 
 def encode_target_column(df: pd.DataFrame):
-    if TARGET_COL in df.columns:
-        y_str = df[TARGET_COL].astype(str).str.strip().str.upper()
-        df[TARGET_COL] = y_str.map(LABEL_MAP)
-    return df
+    """Map N/P/Y -> 0/1/2 if Class column exists; return y_true (or None)."""
+    if TARGET_COL not in df.columns:
+        return df, None
+
+    y_raw = df[TARGET_COL].astype(str).str.strip().str.upper()
+    if not set(y_raw.unique()).issubset(set(LABEL_MAP.keys())):
+        st.warning(
+            f"`{TARGET_COL}` column present but contains values outside N/P/Y: "
+            f"{sorted(y_raw.unique())}. Metrics will not be computed."
+        )
+        return df, None
+
+    df[TARGET_COL] = y_raw.map(LABEL_MAP)
+    return df, df[TARGET_COL].values
 
 def compute_metrics_multiclass(y_true, y_pred):
     y_true = np.asarray(y_true, dtype=int)
@@ -92,7 +81,6 @@ def compute_metrics_multiclass(y_true, y_pred):
 
 # ---------- SIDEBAR ----------
 st.sidebar.markdown("### ⚙️ Model Controls")
-
 model_options = [
     "Logistic Regression",
     "Decision Tree",
@@ -104,39 +92,43 @@ model_options = [
 selected_model_name = st.sidebar.selectbox("Choose a model", model_options)
 
 uploaded_file = st.sidebar.file_uploader(
-    "Upload test CSV (same features; Class optional)",
+    "Upload test CSV (features + optional Class column)",
     type=["csv"],
 )
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Legend**")
+st.sidebar.markdown("**Class codes**")
 st.sidebar.markdown("🟢 N = Non‑diabetic")
 st.sidebar.markdown("🟡 P = Pre‑diabetic")
 st.sidebar.markdown("🔴 Y = Diabetic")
 
-# ---------- MAIN LOGIC ----------
-if uploaded_file is not None:
+# ---------- MAIN ----------
+if uploaded_file is None:
+    st.info("Upload a test CSV from the sidebar to see predictions and metrics.")
+else:
     df_test = pd.read_csv(uploaded_file)
     st.markdown("### 📂 Uploaded Data Preview")
     st.write(df_test.head())
 
-    df_test = encode_target_column(df_test)
     scaler, feature_columns = load_scaler_and_features()
 
+    # Encode target if present
+    df_test, y_true = encode_target_column(df_test)
+
+    # Check that all required feature columns exist
     missing_features = [c for c in feature_columns if c not in df_test.columns]
     if missing_features:
         st.error(
             f"Missing feature columns in uploaded CSV: {missing_features}. "
-            "Please upload a test file with the same features used for training."
+            "Please upload a test file with exactly the same feature columns "
+            "used during training."
         )
     else:
         X_new = df_test[feature_columns].copy()
-        y_true = None
-        if TARGET_COL in df_test.columns:
-            y_true = df_test[TARGET_COL].values
 
         model = load_model(selected_model_name)
 
+        # Scale features for LR and kNN
         if selected_model_name in ["Logistic Regression", "kNN"]:
             X_input = scaler.transform(X_new)
         else:
@@ -145,26 +137,33 @@ if uploaded_file is not None:
         y_pred = model.predict(X_input)
         y_pred_labels = [INV_LABEL_MAP.get(int(v), v) for v in y_pred]
 
-        # ---------- PREDICTIONS TABLE ----------
+        # ---- Predictions table ----
         st.markdown("### 🔍 Predictions")
         pred_df = pd.DataFrame({
-            "Predicted_Class_Code": y_pred,
-            "Predicted_Class_Label": y_pred_labels,
+            "Predicted_Code": y_pred,
+            "Predicted_Label": y_pred_labels,
         })
-        st.dataframe(pred_df.head(20))
+        st.dataframe(pred_df.head(50))
 
-        # ---------- METRICS & DIAGNOSTICS ----------
-        if y_true is not None:
+        # ---- Metrics & confusion matrix (only if Class is present & valid) ----
+        if y_true is None:
+            st.warning(
+                "No valid `Class` column found in uploaded CSV. "
+                "Metrics and confusion matrix are not computed. "
+                "Add a `Class` column with values N / P / Y if you want evaluation."
+            )
+        else:
+            st.markdown("### 📈 Evaluation Metrics (macro‑averaged)")
+
             acc, prec, rec, f1, mcc = compute_metrics_multiclass(y_true, y_pred)
-
             col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric("Accuracy", f"{acc:.3f}")
-            col2.metric("Precision (macro)", f"{prec:.3f}")
-            col3.metric("Recall (macro)", f"{rec:.3f}")
-            col4.metric("F1 (macro)", f"{f1:.3f}")
+            col2.metric("Precision", f"{prec:.3f}")
+            col3.metric("Recall", f"{rec:.3f}")
+            col4.metric("F1 Score", f"{f1:.3f}")
             col5.metric("MCC", f"{mcc:.3f}")
 
-            # Confusion matrix
+            st.markdown("### 🧩 Confusion Matrix")
             cm = confusion_matrix(y_true, y_pred, labels=CLASSES)
             fig, ax = plt.subplots(figsize=(4, 3))
             sns.heatmap(
@@ -178,11 +177,9 @@ if uploaded_file is not None:
             )
             ax.set_xlabel("Predicted")
             ax.set_ylabel("Actual")
-            ax.set_title(f"Confusion Matrix - {selected_model_name}")
-            st.markdown("### 🧩 Confusion Matrix")
+            ax.set_title(f"{selected_model_name}")
             st.pyplot(fig)
 
-            # Classification report
             st.markdown("### 📊 Classification Report")
             st.text(
                 classification_report(
@@ -192,5 +189,3 @@ if uploaded_file is not None:
                     digits=4,
                 )
             )
-else:
-    st.info("Upload a test CSV from the sidebar to see predictions and metrics.")
