@@ -32,7 +32,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.markdown("## 🩺 Diabetes Status Prediction Dashboard")
+st.markdown("## 🩺 Diabetes Prediction App")
 st.markdown(
     "Predict whether a person is **Non‑diabetic (N)**, **Pre‑diabetic (P)**, "
     "or **Diabetic (Y)** using six ML models."
