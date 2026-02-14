@@ -14,14 +14,14 @@ import joblib
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
     f1_score, matthews_corrcoef,
-    confusion_matrix, classification_report
+    confusion_matrix, classification_report,
+    average_precision_score,
 )
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 # ---------- CONFIG ----------
-# Must match your test CSV header
-TARGET_COL = "CLASS"
+TARGET_COL = "CLASS"          # matches your test CSV
 LABEL_MAP = {"N": 0, "P": 1, "Y": 2}
 INV_LABEL_MAP = {v: k for k, v in LABEL_MAP.items()}
 CLASSES = [0, 1, 2]
@@ -84,7 +84,7 @@ def encode_target_column(df: pd.DataFrame):
     df[TARGET_COL] = y_raw.map(LABEL_MAP)
     return df, df[TARGET_COL].values
 
-def compute_metrics_multiclass(y_true, y_pred):
+def compute_metrics_multiclass(y_true, y_pred, y_proba=None):
     y_true = np.asarray(y_true, dtype=int)
     y_pred = np.asarray(y_pred, dtype=int)
 
@@ -94,7 +94,18 @@ def compute_metrics_multiclass(y_true, y_pred):
     f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
     mcc = matthews_corrcoef(y_true, y_pred)
 
-    return acc, prec, rec, f1, mcc
+    auc = np.nan
+    if y_proba is not None:
+        try:
+            # macro PR-AUC (Average Precision)
+            y_true_bin = (y_true.reshape(-1, 1) == np.array(CLASSES)).astype(int)
+            auc = average_precision_score(
+                y_true_bin, y_proba, average="macro"
+            )
+        except Exception:
+            auc = np.nan
+
+    return acc, prec, rec, f1, mcc, auc
 
 # ---------- SIDEBAR ----------
 st.sidebar.markdown("### ⚙️ Model Controls")
@@ -155,6 +166,9 @@ else:
         y_pred_int = np.asarray(y_pred, dtype=int)
         y_pred_labels = [INV_LABEL_MAP.get(int(v), v) for v in y_pred_int]
 
+        # Probabilities (needed for AUC)
+        y_proba = model.predict_proba(X_input) if hasattr(model, "predict_proba") else None
+
         # ---- Predictions table ----
         st.markdown("### 🔍 Predictions")
         pred_df = pd.DataFrame({
@@ -167,18 +181,25 @@ else:
         if y_true is None:
             st.warning(
                 f"No valid `{TARGET_COL}` column found in uploaded CSV. "
-                "Metrics and confusion matrix are not computed."
+                "Metrics, AUC and confusion matrix are not computed."
             )
         else:
             st.markdown("### 📈 Evaluation Metrics (macro‑averaged)")
 
-            acc, prec, rec, f1, mcc = compute_metrics_multiclass(y_true, y_pred_int)
-            col1, col2, col3, col4, col5 = st.columns(5)
+            acc, prec, rec, f1, mcc, auc = compute_metrics_multiclass(
+                y_true, y_pred_int, y_proba
+            )
+
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
             col1.metric("Accuracy", f"{acc:.3f}")
             col2.metric("Precision", f"{prec:.3f}")
             col3.metric("Recall", f"{rec:.3f}")
             col4.metric("F1 Score", f"{f1:.3f}")
             col5.metric("MCC", f"{mcc:.3f}")
+            if not np.isnan(auc):
+                col6.metric("AUC (PR)", f"{auc:.3f}")
+            else:
+                col6.metric("AUC (PR)", "NaN")
 
             st.markdown("### 🧩 Confusion Matrix")
             cm = confusion_matrix(y_true, y_pred_int, labels=CLASSES)
