@@ -7,6 +7,14 @@ Original file is located at
     https://colab.research.google.com/drive/1yV7ESiLHmfIxpFAG1X05Il3AwSYHPHJd
 """
 
+Here is the full updated `app.py` that:
+
+- Accepts `CLASS` with labels **0/1/2** or `N/P/Y`.  
+- Computes and displays metrics + confusion matrix when labels are present.  
+
+Copy–paste this as `app.py` in your repo.
+
+```python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -21,7 +29,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # ---------- CONFIG ----------
-TARGET_COL = "CLASS"  # must match column name in test CSV
+# Must match your test CSV header
+TARGET_COL = "CLASS"
 LABEL_MAP = {"N": 0, "P": 1, "Y": 2}
 INV_LABEL_MAP = {v: k for k, v in LABEL_MAP.items()}
 CLASSES = [0, 1, 2]
@@ -52,11 +61,28 @@ def load_scaler_and_features():
     return scaler, feature_columns
 
 def encode_target_column(df: pd.DataFrame):
-    """Map N/P/Y -> 0/1/2 if Class column exists; return y_true (or None)."""
+    """
+    Return df and numeric y_true.
+    Accepts CLASS as 0/1/2 or N/P/Y.
+    """
     if TARGET_COL not in df.columns:
         return df, None
 
-    y_raw = df[TARGET_COL].astype(str).str.strip().str.upper()
+    col = df[TARGET_COL]
+
+    # Case 1: already numeric 0/1/2
+    if np.issubdtype(col.dtype, np.number):
+        unique_vals = set(col.unique())
+        if not unique_vals.issubset({0, 1, 2}):
+            st.warning(
+                f"`{TARGET_COL}` column has numeric values outside 0/1/2: "
+                f"{sorted(unique_vals)}. Metrics will not be computed."
+            )
+            return df, None
+        return df, col.astype(int).values
+
+    # Case 2: string labels N/P/Y
+    y_raw = col.astype(str).str.strip().str.upper()
     if not set(y_raw.unique()).issubset(set(LABEL_MAP.keys())):
         st.warning(
             f"`{TARGET_COL}` column present but contains values outside N/P/Y: "
@@ -92,15 +118,15 @@ model_options = [
 selected_model_name = st.sidebar.selectbox("Choose a model", model_options)
 
 uploaded_file = st.sidebar.file_uploader(
-    "Upload test CSV (features + optional Class column)",
+    "Upload test CSV (features + CLASS column as 0/1/2 or N/P/Y)",
     type=["csv"],
 )
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Class codes**")
-st.sidebar.markdown("🟢 N = Non‑diabetic")
-st.sidebar.markdown("🟡 P = Pre‑diabetic")
-st.sidebar.markdown("🔴 Y = Diabetic")
+st.sidebar.markdown("🟢 0 / N = Non‑diabetic")
+st.sidebar.markdown("🟡 1 / P = Pre‑diabetic")
+st.sidebar.markdown("🔴 2 / Y = Diabetic")
 
 # ---------- MAIN ----------
 if uploaded_file is None:
@@ -135,27 +161,27 @@ else:
             X_input = X_new
 
         y_pred = model.predict(X_input)
-        y_pred_labels = [INV_LABEL_MAP.get(int(v), v) for v in y_pred]
+        y_pred_int = np.asarray(y_pred, dtype=int)
+        y_pred_labels = [INV_LABEL_MAP.get(int(v), v) for v in y_pred_int]
 
         # ---- Predictions table ----
         st.markdown("### 🔍 Predictions")
         pred_df = pd.DataFrame({
-            "Predicted_Code": y_pred,
+            "Predicted_Code": y_pred_int,
             "Predicted_Label": y_pred_labels,
         })
         st.dataframe(pred_df.head(50))
 
-        # ---- Metrics & confusion matrix (only if Class is present & valid) ----
+        # ---- Metrics & confusion matrix (only if target is present & valid) ----
         if y_true is None:
             st.warning(
-                "No valid `Class` column found in uploaded CSV. "
-                "Metrics and confusion matrix are not computed. "
-                "Add a `Class` column with values N / P / Y if you want evaluation."
+                f"No valid `{TARGET_COL}` column found in uploaded CSV. "
+                "Metrics and confusion matrix are not computed."
             )
         else:
             st.markdown("### 📈 Evaluation Metrics (macro‑averaged)")
 
-            acc, prec, rec, f1, mcc = compute_metrics_multiclass(y_true, y_pred)
+            acc, prec, rec, f1, mcc = compute_metrics_multiclass(y_true, y_pred_int)
             col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric("Accuracy", f"{acc:.3f}")
             col2.metric("Precision", f"{prec:.3f}")
@@ -164,7 +190,7 @@ else:
             col5.metric("MCC", f"{mcc:.3f}")
 
             st.markdown("### 🧩 Confusion Matrix")
-            cm = confusion_matrix(y_true, y_pred, labels=CLASSES)
+            cm = confusion_matrix(y_true, y_pred_int, labels=CLASSES)
             fig, ax = plt.subplots(figsize=(4, 3))
             sns.heatmap(
                 cm,
@@ -184,8 +210,9 @@ else:
             st.text(
                 classification_report(
                     y_true,
-                    y_pred,
+                    y_pred_int,
                     target_names=[INV_LABEL_MAP[c] for c in CLASSES],
                     digits=4,
                 )
             )
+```
