@@ -90,7 +90,7 @@ The preprocessing pipeline applied in the training notebook includes:
 
 ---
 
-## 5. Models Used and Evaluation Metrics (Assignment Section 3 – Step 5)
+## 5. Models Used and Evaluation Metrics
 
 Six classification models were implemented on the same preprocessed dataset, as specified in the assignment:
 
